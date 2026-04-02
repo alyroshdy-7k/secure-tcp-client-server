@@ -4,80 +4,47 @@
 #include <arpa/inet.h>
 #include "security.h"
 
-#define PORT 8080
-#define BUFFER_SIZE 1024
+int main() {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in addr = {AF_INET, htons(8080), inet_addr("127.0.0.1")};
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) return 1;
 
-int main()
-{
-    int sock;
-    struct sockaddr_in server_address;
+    char u[50], p[50], buf[1024];
+    printf("Username: "); scanf("%s", u);
+    printf("Password: "); scanf("%s", p);
+    getchar();
 
-    char buffer[BUFFER_SIZE] = {0};
-    char auth_key[] = "secure123";
-    char xor_key[] = "key123";
+    sprintf(buf, "%s %s", u, p);
+    send(sock, buf, strlen(buf), 0);
 
-    char message[] = "Hello from client";
-    int message_len = strlen(message);
+    int n = read(sock, buf, 1024);
+    buf[n] = '\0';
+    if (strcmp(buf, "AUTH_OK") != 0) return 1;
+    printf("Access Granted.\n");
 
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0)
-    {
-        printf("Socket creation failed\n");
-        return 1;
+    while (1) {
+        printf("\nEnter Message: ");
+        if (fgets(buf, 1024, stdin) == NULL) break;
+        buf[strcspn(buf, "\n")] = 0;
+
+        int len = strlen(buf);
+        int aes_len = ((len + 15) / 16) * 16;
+        unsigned char encrypted[1024] = {0};
+
+        aes_encrypt((unsigned char*)buf, aes_len, encrypted);
+        printf("[CLIENT] SENDING AES ENCRYPTED (HEX): ");
+        for(int i=0; i<aes_len; i++) printf("%02x ", encrypted[i]);
+        printf("\n");
+        send(sock, encrypted, aes_len, 0);
+
+        n = read(sock, buf, 1024);
+        if (n > 0) {
+            printf("[CLIENT] RECEIVED ENCRYPTED ACK (HEX): ");
+            for(int i=0; i<n; i++) printf("%02x ", (unsigned char)buf[i]);
+            printf("\n");
+            // NO DECRYPTION PRINTED HERE PER REQUEST
+        }
     }
-
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(PORT);
-    server_address.sin_addr.s_addr = INADDR_ANY;
-
-    if (connect(sock, (struct sockaddr*)&server_address, sizeof(server_address)) < 0)
-    {
-        printf("Connection failed\n");
-        close(sock);
-        return 1;
-    }
-
-    send(sock, auth_key, strlen(auth_key) + 1, 0);
-
-    int auth_bytes = read(sock, buffer, BUFFER_SIZE - 1);
-    if (auth_bytes <= 0)
-    {
-        printf("Failed to receive authentication response\n");
-        close(sock);
-        return 1;
-    }
-
-    buffer[auth_bytes] = '\0';
-
-    if (strcmp(buffer, "AUTH_OK") != 0)
-    {
-        printf("Authentication failed\n");
-        close(sock);
-        return 0;
-    }
-
-    printf("Authentication successful!\n");
-    printf("Original message: %s\n", message);
-
-    xor_encrypt_decrypt(message, message_len, xor_key);
-    printf("Encrypted message sent\n");
-    send(sock, message, message_len, 0);
-
-    int n = read(sock, buffer, BUFFER_SIZE);
-    if (n <= 0)
-    {
-        printf("Failed to receive encrypted reply\n");
-        close(sock);
-        return 1;
-    }
-
-    printf("Encrypted reply received\n");
-
-    xor_encrypt_decrypt(buffer, n, xor_key);
-    buffer[n] = '\0';
-
-    printf("Decrypted reply: %s\n", buffer);
-
     close(sock);
     return 0;
 }
